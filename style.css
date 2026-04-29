@@ -266,3 +266,66 @@ body {
 .fallback-controls button:hover {
   background: rgba(255, 255, 255, 0.1);
 }
+
+.mode-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.hint-text {
+  color: rgba(255,255,255,0.8);
+  font-size: 1rem;
+  font-weight: 500;
+  text-align: center;
+}
+
+.live-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(0,0,0,0.4);
+  border: 1.5px solid rgba(255,255,255,0.25);
+  color: white;
+  padding: 0.6rem 1.4rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  backdrop-filter: blur(8px);
+  transition: all 0.25s ease;
+}
+
+.live-mode-btn:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.4);
+}
+
+.live-mode-btn.active {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.7);
+  color: #fca5a5;
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.35);
+  animation: live-pulse 1.5s infinite;
+}
+
+.live-icon {
+  font-size: 1.1rem;
+}
+
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  70%  { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.status-live {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.5);
+  animation: live-pulse 1.5s infinite;
+}
