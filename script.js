@@ -673,19 +673,6 @@ document.body.addEventListener('click', async (e) => {
       return;
     }
 
-    if (taps === 1) {
-      if (appState === 'listening') {
-        // Start recording — recognition is already running, just switch state
-        currentTranscript = '';
-        setAppState('recording');
-        await resumeAudioCtx();
-        playBeep(800, 0.12);
-
-      } else if (appState === 'recording') {
-        // Send query — recognition keeps running in background
-        playBeep(400, 0.12);
-        await processCommand();
-      }
-    }
+    // All other taps are ignored — voice auto-send handles everything
   }, TRIPLE_TAP_DELAY);
 });
