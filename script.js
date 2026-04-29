@@ -2,14 +2,15 @@
 const video = document.getElementById('video-feed');
 const startOverlay = document.getElementById('start-overlay');
 const statusOverlay = document.getElementById('status-overlay');
-const startBtn = document.getElementById('start-btn');
 const transcriptEl = document.getElementById('transcript');
 const statusBadge = document.getElementById('status-badge');
-const liveModeBtn = document.getElementById('live-mode-btn');
 
 // ── Ollama Config ──────────────────────────────────────────────────────────────
-const OLLAMA_URL = 'http://localhost:11434';
 const OLLAMA_MODEL = 'minicpm-v';
+// Reads from localStorage so the user can configure their ngrok URL on mobile
+function getOllamaUrl() {
+  return localStorage.getItem('ollama_url') || 'http://localhost:11434';
+}
 
 // ── App State ──────────────────────────────────────────────────────────────────
 let appState = 'idle'; // idle, listening, recording, processing, speaking, error, live
@@ -19,6 +20,121 @@ let liveLoopRunning = false; // prevents multiple concurrent loops
 // ── Speech Recognition ─────────────────────────────────────────────────────────
 let recognition = null;
 let currentTranscript = '';
+let recognitionActive = false;  // true only between onstart and onend
+let queryDebounceTimer = null;  // auto-send after silence
+const QUERY_DEBOUNCE_MS = 1500; // ms of silence before auto-sending
+
+// ── Post-TTS deaf period ─────────────────────────────────────────────────────────────────
+// After TTS stops, the speaker still outputs audio for a moment.
+// Ignore all mic input for POST_TTS_DEAF_MS ms to prevent the AI hearing itself.
+let ttsEndedAt = 0;
+const POST_TTS_DEAF_MS = 2000;
+
+// ── startFreshRecognition ─────────────────────────────────────────────────────────────────
+// Always creates a FRESH instance — never reuses old ones.
+// Chrome's SpeechRecognition gets corrupted after TTS; creating new avoids this.
+function startFreshRecognition() {
+  if (appState === 'idle' || appState === 'speaking') return;
+  if (recognitionActive) return; // already listening
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+
+  // Hard-abort and discard any old instance
+  if (recognition) {
+    try { recognition.abort(); } catch(e) {}
+    recognition = null;
+  }
+
+  const rec = new SR();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = 'en-IN';
+
+  rec.onstart = () => {
+    recognitionActive = true;
+    console.log('[A-eye] ✓ Listening');
+  };
+
+  rec.onresult = (event) => {
+    // ── Deaf period guard: discard anything heard right after TTS ─────────────
+    if (Date.now() - ttsEndedAt < POST_TTS_DEAF_MS) {
+      currentTranscript = '';
+      return;
+    }
+    let interim = '';
+    let final = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) final += t;
+      else interim += t;
+    }
+
+    // Show what's being heard in real time
+    if (interim || currentTranscript) {
+      transcriptEl.textContent = (currentTranscript + interim).trim() || 'Listening...';
+    }
+
+    if (final) {
+      if (detectAndExecuteCommand(final)) {
+        currentTranscript = '';
+        if (queryDebounceTimer) { clearTimeout(queryDebounceTimer); queryDebounceTimer = null; }
+        return;
+      }
+
+      currentTranscript += final;
+
+      if (appState === 'processing' || appState === 'speaking' || appState === 'live') return;
+
+      if (queryDebounceTimer) clearTimeout(queryDebounceTimer);
+      queryDebounceTimer = setTimeout(() => {
+        queryDebounceTimer = null;
+        if (currentTranscript.trim()) {
+          setAppState('recording');
+          processCommand();
+        }
+      }, QUERY_DEBOUNCE_MS);
+    }
+  };
+
+  rec.onerror = (e) => {
+    recognitionActive = false;
+    console.warn('[A-eye] Recognition error:', e.error);
+    if (e.error === 'not-allowed') {
+      alert('Microphone permission denied. Please allow microphone access.');
+      return;
+    }
+    // Restart after any non-fatal error
+    if (e.error !== 'aborted') {
+      setTimeout(() => startFreshRecognition(), 600);
+    }
+  };
+
+  rec.onend = () => {
+    recognitionActive = false;
+    console.log('[A-eye] Recognition ended');
+    // Only auto-restart when NOT blocked by TTS — utterance.onend handles the TTS case
+    if (appState !== 'idle' && appState !== 'speaking') {
+      setTimeout(() => startFreshRecognition(), 400);
+    }
+  };
+
+  recognition = rec;
+  try {
+    rec.start();
+  } catch(e) {
+    recognitionActive = false;
+    console.warn('[A-eye] start() threw:', e.message);
+    setTimeout(() => startFreshRecognition(), 600);
+  }
+}
+
+// Watchdog: every 2 s, kick recognition if it's supposed to be on but isn't
+setInterval(() => {
+  if (appState !== 'idle' && appState !== 'speaking' && !recognitionActive) {
+    startFreshRecognition();
+  }
+}, 2000);
 
 // ── Audio Context for Sound Cues ───────────────────────────────────────────────
 let sharedAudioCtx = null;
@@ -104,9 +220,9 @@ function setAppState(newState, message = '') {
   if (message) {
     transcriptEl.textContent = message;
   } else if (appState === 'listening') {
-    transcriptEl.textContent = 'Tap screen to speak';
+    transcriptEl.textContent = 'Listening — just speak...';
   } else if (appState === 'recording') {
-    transcriptEl.textContent = 'Listening... Tap to send';
+    transcriptEl.textContent = 'Heard you — sending...';
   } else if (appState === 'processing') {
     transcriptEl.textContent = 'Analyzing...';
   } else if (appState === 'speaking') {
@@ -131,7 +247,7 @@ Look at the image carefully and respond to their request clearly and concisely.
 You MUST always respond in ENGLISH ONLY. Do not use any other language under any circumstances.
 Respond in plain text only — no markdown, no bullet points, no special characters.`;
 
-  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+  const response = await fetch(`${getOllamaUrl()}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -155,56 +271,52 @@ Respond in plain text only — no markdown, no bullet points, no special charact
   return { lang: 'en-US', text: data.response.trim() };
 }
 
-// ── Speech Recognition Setup ───────────────────────────────────────────────────
-function setupSpeechRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    alert('Speech Recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
-    return null;
+// setupSpeechRecognition is replaced by startFreshRecognition() above.
+// This stub exists only to check browser support at app start.
+function checkSpeechSupport() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    alert('Speech Recognition is not supported. Please use Google Chrome or Microsoft Edge.');
+    return false;
   }
-
-  const rec = new SpeechRecognition();
-  rec.continuous = true;      // keep listening until manually stopped
-  rec.interimResults = true;  // show live transcript
-  rec.lang = 'en-IN';         // Works for English, Hindi, and Marathi in Chrome
-
-  rec.onresult = (event) => {
-    let interim = '';
-    let final = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const t = event.results[i][0].transcript;
-      if (event.results[i].isFinal) {
-        final += t;
-      } else {
-        interim += t;
-      }
-    }
-    if (final) currentTranscript += final;
-    // Show live transcript on screen
-    transcriptEl.textContent = (currentTranscript + interim) || 'Listening...';
-  };
-
-  rec.onerror = (e) => {
-    console.error('SpeechRecognition error:', e.error);
-    if (e.error === 'not-allowed') {
-      alert('Microphone permission denied. Please allow microphone access.');
-    }
-  };
-
-  rec.onend = () => {
-    // If still in recording state (e.g. silence timeout), restart to keep listening
-    if (appState === 'recording') {
-      try { rec.start(); } catch(e) {}
-    }
-  };
-
-  return rec;
+  return true;
 }
 
 // ── TTS (Text to Speech) ───────────────────────────────────────────────────────
-window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-window.speechSynthesis.getVoices();
 window.utterances = [];
+
+// ── Audible Welcome Prompt ─────────────────────────────────────────────────────
+// Fires once on page load to guide visually impaired users before any tap.
+function speakWelcomePrompt() {
+  try {
+    const utterance = new SpeechSynthesisUtterance('A-eye. Tap anywhere to start.');
+    utterance.lang = 'en-US';
+    utterance.rate = 0.85;
+    utterance.volume = 1;
+    window.speechSynthesis.speak(utterance);
+  } catch(e) {
+    // Browser blocked autoplay speech — visual prompt is still shown
+    console.log('[A-eye] Autoplay speech blocked by browser.');
+  }
+}
+
+// Chrome loads voices asynchronously — wait for them before speaking
+let welcomeSpoken = false;
+function triggerWelcome() {
+  if (welcomeSpoken) return;
+  welcomeSpoken = true;
+  speakWelcomePrompt();
+}
+
+window.speechSynthesis.onvoiceschanged = () => {
+  window.speechSynthesis.getVoices();
+  triggerWelcome();
+};
+
+// Fallback: if voices already loaded (Firefox / Edge) fire immediately
+if (window.speechSynthesis.getVoices().length > 0) {
+  triggerWelcome();
+}
 
 function speak(text, langCode = 'en-US', onEnd) {
   window.speechSynthesis.cancel();
@@ -226,12 +338,22 @@ function speak(text, langCode = 'en-US', onEnd) {
   window.utterances.push(utterance);
 
   utterance.onend = () => {
+    ttsEndedAt = Date.now(); // stamp when TTS audio stopped
     if (onEnd) onEnd();
     window.utterances = window.utterances.filter(u => u !== utterance);
+    // TTS has finished — now safe to start fresh recognition
+    setTimeout(() => {
+      currentTranscript = ''; // discard anything picked up during TTS
+      startFreshRecognition();
+    }, 600);
   };
   utterance.onerror = (e) => {
-    console.error('Speech synthesis error:', e);
+    ttsEndedAt = Date.now(); // stamp even on cancel/interrupt
+    if (e.error !== 'interrupted' && e.error !== 'canceled') {
+      console.error('Speech synthesis error:', e.error);
+    }
     if (onEnd) onEnd();
+    setTimeout(() => startFreshRecognition(), 600);
   };
 
   window.speechSynthesis.speak(utterance);
@@ -248,11 +370,6 @@ async function processCommand() {
   }
 
   const base64Image = captureImage();
-
-  // Acknowledge the request
-  const ackPhrases = ['Got it!', 'On it!', 'Processing your request.', 'Looking into that.'];
-  speak(ackPhrases[Math.floor(Math.random() * ackPhrases.length)], 'en-US');
-
   setAppState('processing', `You said: "${transcript}"`);
   await startLoadingSound();
 
@@ -269,12 +386,127 @@ async function processCommand() {
   }
 }
 
+// ── Voice Command Detection ────────────────────────────────────────────────────
+const CMD_STOP = [
+  'stop', 'quiet', 'silence', 'shut up', 'be quiet', 'cancel', 'nevermind', 'never mind',
+];
+const CMD_LIVE_ON  = [
+  'live mode on', 'turn on live mode', 'start live mode',
+  'enable live mode', 'activate live mode', 'go live',
+];
+const CMD_LIVE_OFF = [
+  'live mode off', 'turn off live mode', 'stop live mode',
+  'disable live mode', 'exit live mode', 'stop live',
+];
+const CMD_DESCRIBE = [
+  'describe this', 'describe what you see', 'what do you see',
+  "what's in front", "what's around", 'what am i looking at',
+  'describe my surroundings', 'describe the scene',
+  'look around', 'tell me what you see', "what's here",
+  'scan the room', 'describe everything',
+];
+const CMD_CLOSE = [
+  'turn off app', 'close app', 'exit app', 'close the app',
+  'turn off the app', 'shutdown app', 'shut down app', 'goodbye', 'good bye',
+];
+
+function detectAndExecuteCommand(text) {
+  const t = text.toLowerCase().trim();
+
+  // ── Stop wins over everything — checked first ──────────────────────────────
+  // Exact-word match to avoid false positives (e.g. "stop live mode" handled separately)
+  const words = t.split(/\s+/);
+  if (CMD_STOP.some(p => t === p || words.includes(p))) {
+    window.speechSynthesis.cancel();
+    stopLoadingSound();
+    currentTranscript = '';
+    if (isLiveMode) stopLiveMode();
+    else setAppState('listening');
+    setTimeout(() => ensureListening(), 400);
+    return true;
+  }
+
+  if (CMD_LIVE_ON.some(p => t.includes(p))) {
+    if (!isLiveMode) startLiveMode();
+    return true;
+  }
+  if (CMD_LIVE_OFF.some(p => t.includes(p))) {
+    if (isLiveMode) stopLiveMode();
+    return true;
+  }
+  if (CMD_DESCRIBE.some(p => t.includes(p))) {
+    oneShotDescribe();
+    return true;
+  }
+  if (CMD_CLOSE.some(p => t.includes(p))) {
+    closeApp();
+    return true;
+  }
+  return false;
+}
+
+function closeApp() {
+  window.speechSynthesis.cancel();
+  stopLoadingSound();
+  if (recognition) { try { recognition.abort(); } catch(e) {} }
+
+  // Speak goodbye, then close
+  const bye = new SpeechSynthesisUtterance('Goodbye.');
+  bye.lang = 'en-US';
+  bye.rate = 0.9;
+  bye.onend = () => {
+    // window.close() works in PWA standalone mode and script-opened windows
+    window.close();
+    // Fallback for regular browser tabs (window.close blocked)
+    setTimeout(() => { window.location.href = 'about:blank'; }, 300);
+  };
+  window.speechSynthesis.speak(bye);
+}
+
+async function oneShotDescribe() {
+  if (appState === 'processing' || appState === 'live') return;
+  window.speechSynthesis.cancel();
+  stopLoadingSound();
+  currentTranscript = '';
+
+  const base64Image = captureImage();
+  setAppState('processing', 'Describing the scene...');
+  await startLoadingSound();
+
+  try {
+    const response = await fetch(`${getOllamaUrl()}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt: 'Describe what is directly in front of the camera in 2 to 3 sentences. Be specific and helpful for a visually impaired person. English only. No markdown. No filler phrases.',
+        images: [base64Image],
+        stream: false
+      })
+    });
+    if (!response.ok) throw new Error('Ollama unreachable');
+    const data = await response.json();
+    const desc = data.response ? data.response.trim() : null;
+    stopLoadingSound();
+    if (desc) {
+      setAppState('speaking');
+      speak(desc, 'en-US', () => setAppState('listening'));
+    } else {
+      setAppState('listening');
+    }
+  } catch (err) {
+    stopLoadingSound();
+    console.error(err);
+    speak('Could not describe the scene. Make sure Ollama is running.', 'en-US', () => setAppState('listening'));
+  }
+}
+
 // ── Live Mode ──────────────────────────────────────────────────────────────────
 
 // Fetches a single live description from Ollama
 async function fetchLiveDescription() {
   const base64Image = captureImage();
-  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+  const response = await fetch(`${getOllamaUrl()}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -341,41 +573,27 @@ async function runLiveLoop() {
 }
 
 function startLiveMode() {
-  if (appState === 'recording') {
-    recognition.stop();
-  }
   window.speechSynthesis.cancel();
   stopLoadingSound();
+  currentTranscript = '';
 
   isLiveMode = true;
-  liveModeBtn.classList.add('active');
-  liveModeBtn.innerHTML = '<span class="live-icon">🔴</span> Stop Live';
-  speak('Live mode on. Describing your surroundings.', 'en-US', () => {
+  speak('Live mode on. Tap anywhere to stop. Describing your surroundings.', 'en-US', () => {
     runLiveLoop();
   });
 }
 
 function stopLiveMode() {
   isLiveMode = false;
-  liveModeBtn.classList.remove('active');
-  liveModeBtn.innerHTML = '<span class="live-icon">👁</span> Live Mode';
   stopLoadingSound();
   window.speechSynthesis.cancel();
   setAppState('listening');
   speak('Live mode off.', 'en-US');
 }
 
-liveModeBtn.addEventListener('click', (e) => {
-  e.stopPropagation(); // don't trigger the tap-to-talk handler
-  if (isLiveMode) {
-    stopLiveMode();
-  } else {
-    startLiveMode();
-  }
-});
 
-// ── Start App ──────────────────────────────────────────────────────────────────
-startBtn.addEventListener('click', async () => {
+// ── Start App (tap anywhere on start screen) ───────────────────────────────────
+startOverlay.addEventListener('click', async () => {
   try {
     // Camera only — SpeechRecognition handles mic separately
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -383,9 +601,8 @@ startBtn.addEventListener('click', async () => {
     });
     video.srcObject = stream;
 
-    // Setup Speech Recognition
-    recognition = setupSpeechRecognition();
-    if (!recognition) return;
+    // Check browser support
+    if (!checkSpeechSupport()) return;
 
     startOverlay.classList.add('hidden');
     statusOverlay.classList.remove('hidden');
@@ -395,10 +612,11 @@ startBtn.addEventListener('click', async () => {
 
     setAppState('speaking');
     speak(
-      'System ready. Tap anywhere to start speaking, then tap again to send.',
+      'System ready. Just speak your question. Say describe this or live mode on.',
       'en-US',
       () => setAppState('listening')
     );
+    // startFreshRecognition will be called by utterance.onend above
 
   } catch (err) {
     console.error(err);
@@ -406,37 +624,95 @@ startBtn.addEventListener('click', async () => {
   }
 });
 
-// ── Tap to Talk ────────────────────────────────────────────────────────────────
+// ── Triple-Tap Detection ────────────────────────────────────────────────────────
+let tapCount = 0;
+let tapTimer = null;
+const TRIPLE_TAP_DELAY = 600; // ms window to register 3 taps
+
 document.body.addEventListener('click', async (e) => {
   if (e.target.closest('#start-overlay')) return;
   if (e.target.closest('#live-mode-btn')) return; // handled by its own listener
 
-  // Tapping anywhere while in live mode stops it
-  if (isLiveMode) {
-    stopLiveMode();
-    return;
-  }
+  tapCount++;
 
-  if (appState === 'listening') {
-    // Start listening
-    currentTranscript = '';
-    try {
-      recognition.start();
-    } catch(e) { /* already started */ }
-    setAppState('recording');
+  if (tapTimer) clearTimeout(tapTimer);
 
-    // Warm up audio context + play start beep
-    await resumeAudioCtx();
-    playBeep(800, 0.12);
+  tapTimer = setTimeout(async () => {
+    const taps = tapCount;
+    tapCount = 0;
+    tapTimer = null;
 
-  } else if (appState === 'recording') {
-    // Stop listening and process
-    recognition.stop();
+    if (taps >= 3) {
+      // ── Triple tap: toggle Live Mode ───────────────────────────────────────
+      if (isLiveMode) {
+        stopLiveMode();
+      } else {
+        startLiveMode();
+      }
+      return;
+    }
 
-    // Play stop beep
-    playBeep(400, 0.12);
+    // ── Single tap in live mode: stop it ──────────────────────────────────────
+    if (isLiveMode) {
+      stopLiveMode();
+      return;
+    }
 
-    // processCommand handles everything from here
-    await processCommand();
-  }
+    // ── Single tap while AI is speaking: cut it off immediately ───────────────
+    if (appState === 'speaking') {
+      window.speechSynthesis.cancel();
+      stopLoadingSound();
+      currentTranscript = '';
+      if (queryDebounceTimer) { clearTimeout(queryDebounceTimer); queryDebounceTimer = null; }
+
+      // Hard-reset the recognition state — cancel() leaves Chrome in a dirty state
+      if (recognition) { try { recognition.abort(); } catch(e) {} recognition = null; }
+      recognitionActive = false;
+      ttsEndedAt = Date.now(); // start deaf period so AI doesn't hear its own cutoff
+
+      setAppState('listening');
+      // 1000ms: enough for Chrome to fully release the mic after TTS cancel
+      setTimeout(() => startFreshRecognition(), 1000);
+      return;
+    }
+
+    if (taps === 1) {
+      if (appState === 'listening') {
+        // Start recording — recognition is already running, just switch state
+        currentTranscript = '';
+        setAppState('recording');
+        await resumeAudioCtx();
+        playBeep(800, 0.12);
+
+      } else if (appState === 'recording') {
+        // Send query — recognition keeps running in background
+        playBeep(400, 0.12);
+        await processCommand();
+      }
+    }
+  }, TRIPLE_TAP_DELAY);
+});
+
+// ── Settings Modal ─────────────────────────────────────────────────────────────
+const settingsBtn    = document.getElementById('settings-btn');
+const settingsModal  = document.getElementById('settings-modal');
+const ollamaUrlInput = document.getElementById('ollama-url-input');
+const settingsSave   = document.getElementById('settings-save');
+const settingsCancel = document.getElementById('settings-cancel');
+
+settingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation(); // don't trigger start overlay
+  ollamaUrlInput.value = localStorage.getItem('ollama_url') || '';
+  settingsModal.classList.remove('hidden');
+});
+
+settingsSave.addEventListener('click', () => {
+  const url = ollamaUrlInput.value.trim().replace(/\/$/, '');
+  if (url) localStorage.setItem('ollama_url', url);
+  else localStorage.removeItem('ollama_url');
+  settingsModal.classList.add('hidden');
+});
+
+settingsCancel.addEventListener('click', () => {
+  settingsModal.classList.add('hidden');
 });

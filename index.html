@@ -2,8 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VisionVoice AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>A-eye — VisionVoice AI</title>
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Theme & Status Bar -->
+  <meta name="theme-color" content="#00d4ff">
+  <meta name="background-color" content="#0d0f1a">
+
+  <!-- iOS Home Screen -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="A-eye">
+  <link rel="apple-touch-icon" href="icon-512.png">
+
+  <!-- Android / General -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="application-name" content="A-eye">
+  <meta name="description" content="AI-powered voice assistant for the visually impaired.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
@@ -12,14 +30,29 @@
 <body>
   <div class="app-container">
     <header class="header">
-      <h1>VisionVoice AI</h1>
-      <p>A multimodal, voice-driven assistant</p>
+      <h1>A-eye</h1>
+      <p>AI assistant for the visually impaired</p>
     </header>
 
     <div id="start-overlay" class="start-overlay">
-      <button id="start-btn" class="start-btn">
-        Start VisionVoice AI
-      </button>
+      <div class="tap-anywhere-prompt">
+        <div class="tap-icon">👆</div>
+        <p class="tap-label">Tap anywhere to start</p>
+      </div>
+      <button id="settings-btn" class="settings-btn" title="Configure Ollama URL">⚙️</button>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="settings-modal hidden">
+      <div class="settings-card">
+        <h2>Ollama Server URL</h2>
+        <p>Enter your ngrok or local network URL</p>
+        <input id="ollama-url-input" type="url" placeholder="https://xxxx.ngrok-free.app" autocomplete="off" spellcheck="false">
+        <div class="settings-actions">
+          <button id="settings-save">Save</button>
+          <button id="settings-cancel">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <main class="main-content">
@@ -32,16 +65,25 @@
             IDLE
           </div>
           <div class="mode-controls">
-            <p class="hint-text">Tap screen to Start/Stop speaking</p>
-            <button id="live-mode-btn" class="live-mode-btn" aria-label="Toggle Live Mode">
-              <span class="live-icon">👁</span> Live Mode
-            </button>
+            <p class="hint-text">Just speak — I'm always listening</p>
           </div>
         </div>
       </div>
     </main>
   </div>
 
+
   <script src="script.js"></script>
+
+  <!-- PWA Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then(reg => console.log('[SW] Registered:', reg.scope))
+          .catch(err => console.warn('[SW] Registration failed:', err));
+      });
+    }
+  </script>
 </body>
 </html>
