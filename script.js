@@ -6,11 +6,8 @@ const transcriptEl = document.getElementById('transcript');
 const statusBadge = document.getElementById('status-badge');
 
 // ── Ollama Config ──────────────────────────────────────────────────────────────
+const OLLAMA_URL = 'http://localhost:11434';
 const OLLAMA_MODEL = 'minicpm-v';
-// Reads from localStorage so the user can configure their ngrok URL on mobile
-function getOllamaUrl() {
-  return localStorage.getItem('ollama_url') || 'http://localhost:11434';
-}
 
 // ── App State ──────────────────────────────────────────────────────────────────
 let appState = 'idle'; // idle, listening, recording, processing, speaking, error, live
@@ -247,7 +244,7 @@ Look at the image carefully and respond to their request clearly and concisely.
 You MUST always respond in ENGLISH ONLY. Do not use any other language under any circumstances.
 Respond in plain text only — no markdown, no bullet points, no special characters.`;
 
-  const response = await fetch(`${getOllamaUrl()}/api/generate`, {
+  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -474,7 +471,7 @@ async function oneShotDescribe() {
   await startLoadingSound();
 
   try {
-    const response = await fetch(`${getOllamaUrl()}/api/generate`, {
+    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -506,7 +503,7 @@ async function oneShotDescribe() {
 // Fetches a single live description from Ollama
 async function fetchLiveDescription() {
   const base64Image = captureImage();
-  const response = await fetch(`${getOllamaUrl()}/api/generate`, {
+  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -691,28 +688,4 @@ document.body.addEventListener('click', async (e) => {
       }
     }
   }, TRIPLE_TAP_DELAY);
-});
-
-// ── Settings Modal ─────────────────────────────────────────────────────────────
-const settingsBtn    = document.getElementById('settings-btn');
-const settingsModal  = document.getElementById('settings-modal');
-const ollamaUrlInput = document.getElementById('ollama-url-input');
-const settingsSave   = document.getElementById('settings-save');
-const settingsCancel = document.getElementById('settings-cancel');
-
-settingsBtn.addEventListener('click', (e) => {
-  e.stopPropagation(); // don't trigger start overlay
-  ollamaUrlInput.value = localStorage.getItem('ollama_url') || '';
-  settingsModal.classList.remove('hidden');
-});
-
-settingsSave.addEventListener('click', () => {
-  const url = ollamaUrlInput.value.trim().replace(/\/$/, '');
-  if (url) localStorage.setItem('ollama_url', url);
-  else localStorage.removeItem('ollama_url');
-  settingsModal.classList.add('hidden');
-});
-
-settingsCancel.addEventListener('click', () => {
-  settingsModal.classList.add('hidden');
 });
