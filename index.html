@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisionVoice AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <header class="header">
+      <h1>VisionVoice AI</h1>
+      <p>A multimodal, voice-driven assistant</p>
+    </header>
+
+    <div id="start-overlay" class="start-overlay">
+      <button id="start-btn" class="start-btn">
+        Start VisionVoice AI
+      </button>
+    </div>
+
+    <main class="main-content">
+      <div class="video-container">
+        <video id="video-feed" class="video-feed" autoplay playsinline muted></video>
+        
+        <div id="status-overlay" class="status-overlay hidden">
+          <p id="transcript" class="transcript">Initializing...</p>
+          <div id="status-badge" class="status-badge status-idle">
+            IDLE
+          </div>
+          <p style="color: rgba(255,255,255,0.8); font-size: 1.1rem; margin-top: 0.5rem; font-weight: 500;">Tap anywhere on the screen to Start/Stop speaking</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
