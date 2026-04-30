@@ -251,6 +251,45 @@ function captureImage() {
   return canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
 }
 
+// ── Ollama Streaming Helper ────────────────────────────────────────────────────
+// Uses stream:true so tokens flow continuously — prevents ngrok 30s idle timeout.
+async function streamOllama(prompt, base64Image) {
+  const body = { model: OLLAMA_MODEL, prompt, stream: true };
+  if (base64Image) body.images = [base64Image];
+
+  const response = await fetch(ollamaEndpoint('/api/generate'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama error ${response.status}: ${response.statusText}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let fullText = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // keep incomplete last line
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        if (obj.response) fullText += obj.response;
+        if (obj.done) break;
+      } catch(e) {}
+    }
+  }
+  return fullText.trim();
+}
+
 // ── Ollama API Call ────────────────────────────────────────────────────────────
 async function callOllama(base64Image, transcript) {
   const prompt = `You are a helpful AI assistant for visually impaired people.
@@ -259,28 +298,9 @@ Look at the image carefully and respond to their request clearly and concisely.
 You MUST always respond in ENGLISH ONLY. Do not use any other language under any circumstances.
 Respond in plain text only — no markdown, no bullet points, no special characters.`;
 
-  const response = await fetch(ollamaEndpoint('/api/generate'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt: prompt,
-      images: [base64Image],
-      stream: false
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ollama error ${response.status}: ${response.statusText}. Is Ollama running?`);
-  }
-
-  const data = await response.json();
-
-  if (!data.response) {
-    throw new Error('Empty response from Ollama.');
-  }
-
-  return { lang: 'en-US', text: data.response.trim() };
+  const text = await streamOllama(prompt, base64Image);
+  if (!text) throw new Error('Empty response from Ollama.');
+  return { lang: 'en-US', text };
 }
 
 // setupSpeechRecognition is replaced by startFreshRecognition() above.
@@ -487,19 +507,10 @@ async function oneShotDescribe() {
   await startLoadingSound();
 
   try {
-    const response = await fetch(ollamaEndpoint('/api/generate'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt: 'Describe what is directly in front of the camera in 2 to 3 sentences. Be specific and helpful for a visually impaired person. English only. No markdown. No filler phrases.',
-        images: [base64Image],
-        stream: false
-      })
-    });
-    if (!response.ok) throw new Error('Ollama unreachable');
-    const data = await response.json();
-    const desc = data.response ? data.response.trim() : null;
+    const desc = await streamOllama(
+      'Describe what is directly in front of the camera in 2 to 3 sentences. Be specific and helpful for a visually impaired person. English only. No markdown. No filler phrases.',
+      base64Image
+    );
     stopLoadingSound();
     if (desc) {
       setAppState('speaking');
@@ -519,20 +530,11 @@ async function oneShotDescribe() {
 // Fetches a single live description from Ollama
 async function fetchLiveDescription() {
   const base64Image = captureImage();
-  const response = await fetch(ollamaEndpoint('/api/generate'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      // Ultra-short prompt for fastest possible response
-      prompt: `Describe what's directly in front of the camera in ONE sentence (max 15 words). Be specific. English only. No filler phrases like "I see" or "In the image".`,
-      images: [base64Image],
-      stream: false
-    })
-  });
-  if (!response.ok) throw new Error('Ollama unreachable');
-  const data = await response.json();
-  return data.response ? data.response.trim() : null;
+  const text = await streamOllama(
+    `Describe what's directly in front of the camera in ONE sentence (max 15 words). Be specific. English only. No filler phrases like "I see" or "In the image".`,
+    base64Image
+  );
+  return text || null;
 }
 
 async function runLiveLoop() {
