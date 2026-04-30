@@ -233,10 +233,15 @@ function setAppState(newState, message = '') {
 // ── Camera Capture ─────────────────────────────────────────────────────────────
 function captureImage() {
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
+  // Cap at 320x240 for fast mobile upload — still enough for vision model
+  const MAX_W = 320, MAX_H = 240;
+  const srcW = video.videoWidth || 640;
+  const srcH = video.videoHeight || 480;
+  const scale = Math.min(MAX_W / srcW, MAX_H / srcH, 1);
+  canvas.width  = Math.round(srcW * scale);
+  canvas.height = Math.round(srcH * scale);
   canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+  return canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
 }
 
 // ── Ollama API Call ────────────────────────────────────────────────────────────
@@ -384,8 +389,9 @@ async function processCommand() {
   } catch (error) {
     stopLoadingSound();
     console.error(error);
-    setAppState('error', error.message);
-    speak('Something went wrong. Make sure Ollama is running and try again.', 'en-US', () => setAppState('listening'));
+    const msg = error.message || 'Unknown error';
+    setAppState('error', msg);
+    speak(`Error: ${msg.slice(0, 60)}`, 'en-US', () => setAppState('listening'));
   }
 }
 
