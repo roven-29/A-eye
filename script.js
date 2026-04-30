@@ -405,6 +405,7 @@ const CMD_DESCRIBE = [
 const CMD_CLOSE = [
   'turn off app', 'close app', 'exit app', 'close the app',
   'turn off the app', 'shutdown app', 'shut down app', 'goodbye', 'good bye',
+  'exit the app', 'exit the website', 'exit website', 'close the website', 'close website',
 ];
 
 function detectAndExecuteCommand(text) {
@@ -419,7 +420,7 @@ function detectAndExecuteCommand(text) {
     currentTranscript = '';
     if (isLiveMode) stopLiveMode();
     else setAppState('listening');
-    setTimeout(() => ensureListening(), 400);
+    setTimeout(() => startFreshRecognition(), 400);
     return true;
   }
 
@@ -448,9 +449,9 @@ function closeApp() {
   if (recognition) { try { recognition.abort(); } catch(e) {} }
 
   // Speak goodbye, then close
-  const bye = new SpeechSynthesisUtterance('Goodbye.');
+  const bye = new SpeechSynthesisUtterance('Goodbye. A-eye is closing now. Take care.');
   bye.lang = 'en-US';
-  bye.rate = 0.9;
+  bye.rate = 0.85;
   bye.onend = () => {
     // window.close() works in PWA standalone mode and script-opened windows
     window.close();
@@ -673,19 +674,21 @@ document.body.addEventListener('click', async (e) => {
       return;
     }
 
-    if (taps === 1) {
-      if (appState === 'listening') {
-        // Start recording — recognition is already running, just switch state
-        currentTranscript = '';
-        setAppState('recording');
-        await resumeAudioCtx();
-        playBeep(800, 0.12);
+    // ── Single tap (any other state): reset the mic and restart listening ─────
+    if (appState !== 'idle' && appState !== 'processing') {
+      // Hard-reset everything — clears stuck states, corrupted recognition, etc.
+      if (recognition) { try { recognition.abort(); } catch(e) {} recognition = null; }
+      recognitionActive = false;
+      currentTranscript = '';
+      if (queryDebounceTimer) { clearTimeout(queryDebounceTimer); queryDebounceTimer = null; }
+      ttsEndedAt = 0; // clear deaf period so mic starts immediately
 
-      } else if (appState === 'recording') {
-        // Send query — recognition keeps running in background
-        playBeep(400, 0.12);
-        await processCommand();
-      }
+      playBeep(600, 0.08);
+      setTimeout(() => playBeep(900, 0.08), 120); // double-beep = reset confirmed
+
+      setAppState('listening');
+      setTimeout(() => startFreshRecognition(), 300);
     }
+
   }, TRIPLE_TAP_DELAY);
 });
