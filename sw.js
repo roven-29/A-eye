@@ -1,4 +1,4 @@
-const CACHE_NAME = 'a-eye-v1';
+const CACHE_NAME = 'a-eye-v2';
 
 // App shell — everything needed to load the UI
 const APP_SHELL = [
