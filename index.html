@@ -75,11 +75,13 @@
 
   <script src="script.js"></script>
 
+  <!-- PWA Service Worker Registration -->
   <script>
-    // Unregister any cached service workers so the latest code always loads
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(reg => reg.unregister());
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then(reg => console.log('[SW] Registered:', reg.scope))
+          .catch(err => console.warn('[SW] Registration failed:', err));
       });
     }
   </script>

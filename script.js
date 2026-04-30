@@ -49,7 +49,7 @@ function startFreshRecognition() {
 
   // Hard-abort and discard any old instance
   if (recognition) {
-    try { recognition.abort(); } catch(e) {}
+    try { recognition.abort(); } catch (e) { }
     recognition = null;
   }
 
@@ -129,7 +129,7 @@ function startFreshRecognition() {
   recognition = rec;
   try {
     rec.start();
-  } catch(e) {
+  } catch (e) {
     recognitionActive = false;
     console.warn('[A-eye] start() threw:', e.message);
     setTimeout(() => startFreshRecognition(), 600);
@@ -188,7 +188,7 @@ async function startLoadingSound() {
       gainNode.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.35);
-    } catch(e) { console.error('Audio error:', e); }
+    } catch (e) { console.error('Audio error:', e); }
   };
 
   await playNote();
@@ -214,7 +214,7 @@ function playBeep(freq = 800, duration = 0.1) {
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + duration + 0.05);
-  } catch(e) {}
+  } catch (e) { }
 }
 
 // ── UI State ───────────────────────────────────────────────────────────────────
@@ -245,49 +245,10 @@ function captureImage() {
   const srcW = video.videoWidth || 640;
   const srcH = video.videoHeight || 480;
   const scale = Math.min(MAX_W / srcW, MAX_H / srcH, 1);
-  canvas.width  = Math.round(srcW * scale);
+  canvas.width = Math.round(srcW * scale);
   canvas.height = Math.round(srcH * scale);
   canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
-}
-
-// ── Ollama Streaming Helper ────────────────────────────────────────────────────
-// Uses stream:true so tokens flow continuously — prevents ngrok 30s idle timeout.
-async function streamOllama(prompt, base64Image) {
-  const body = { model: OLLAMA_MODEL, prompt, stream: true };
-  if (base64Image) body.images = [base64Image];
-
-  const response = await fetch(ollamaEndpoint('/api/generate'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ollama error ${response.status}: ${response.statusText}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let fullText = '';
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop(); // keep incomplete last line
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const obj = JSON.parse(line);
-        if (obj.response) fullText += obj.response;
-        if (obj.done) break;
-      } catch(e) {}
-    }
-  }
-  return fullText.trim();
 }
 
 // ── Ollama API Call ────────────────────────────────────────────────────────────
@@ -298,9 +259,28 @@ Look at the image carefully and respond to their request clearly and concisely.
 You MUST always respond in ENGLISH ONLY. Do not use any other language under any circumstances.
 Respond in plain text only — no markdown, no bullet points, no special characters.`;
 
-  const text = await streamOllama(prompt, base64Image);
-  if (!text) throw new Error('Empty response from Ollama.');
-  return { lang: 'en-US', text };
+  const response = await fetch(ollamaEndpoint('/api/generate'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      prompt: prompt,
+      images: [base64Image],
+      stream: false
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama error ${response.status}: ${response.statusText}. Is Ollama running?`);
+  }
+
+  const data = await response.json();
+
+  if (!data.response) {
+    throw new Error('Empty response from Ollama.');
+  }
+
+  return { lang: 'en-US', text: data.response.trim() };
 }
 
 // setupSpeechRecognition is replaced by startFreshRecognition() above.
@@ -326,7 +306,7 @@ function speakWelcomePrompt() {
     utterance.rate = 0.85;
     utterance.volume = 1;
     window.speechSynthesis.speak(utterance);
-  } catch(e) {
+  } catch (e) {
     // Browser blocked autoplay speech — visual prompt is still shown
     console.log('[A-eye] Autoplay speech blocked by browser.');
   }
@@ -423,7 +403,7 @@ async function processCommand() {
 const CMD_STOP = [
   'stop', 'quiet', 'silence', 'shut up', 'be quiet', 'cancel', 'nevermind', 'never mind',
 ];
-const CMD_LIVE_ON  = [
+const CMD_LIVE_ON = [
   'live mode on', 'turn on live mode', 'start live mode',
   'enable live mode', 'activate live mode', 'go live',
 ];
@@ -481,7 +461,7 @@ function detectAndExecuteCommand(text) {
 function closeApp() {
   window.speechSynthesis.cancel();
   stopLoadingSound();
-  if (recognition) { try { recognition.abort(); } catch(e) {} }
+  if (recognition) { try { recognition.abort(); } catch (e) { } }
 
   // Speak goodbye, then close
   const bye = new SpeechSynthesisUtterance('Goodbye.');
@@ -507,10 +487,19 @@ async function oneShotDescribe() {
   await startLoadingSound();
 
   try {
-    const desc = await streamOllama(
-      'Describe what is directly in front of the camera in 2 to 3 sentences. Be specific and helpful for a visually impaired person. English only. No markdown. No filler phrases.',
-      base64Image
-    );
+    const response = await fetch(ollamaEndpoint('/api/generate'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt: 'Describe what is directly in front of the camera in 2 to 3 sentences. Be specific and helpful for a visually impaired person. English only. No markdown. No filler phrases.',
+        images: [base64Image],
+        stream: false
+      })
+    });
+    if (!response.ok) throw new Error('Ollama unreachable');
+    const data = await response.json();
+    const desc = data.response ? data.response.trim() : null;
     stopLoadingSound();
     if (desc) {
       setAppState('speaking');
@@ -530,11 +519,20 @@ async function oneShotDescribe() {
 // Fetches a single live description from Ollama
 async function fetchLiveDescription() {
   const base64Image = captureImage();
-  const text = await streamOllama(
-    `Describe what's directly in front of the camera in ONE sentence (max 15 words). Be specific. English only. No filler phrases like "I see" or "In the image".`,
-    base64Image
-  );
-  return text || null;
+  const response = await fetch(ollamaEndpoint('/api/generate'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      // Ultra-short prompt for fastest possible response
+      prompt: `Describe what's directly in front of the camera in ONE sentence (max 15 words). Be specific. English only. No filler phrases like "I see" or "In the image".`,
+      images: [base64Image],
+      stream: false
+    })
+  });
+  if (!response.ok) throw new Error('Ollama unreachable');
+  const data = await response.json();
+  return data.response ? data.response.trim() : null;
 }
 
 async function runLiveLoop() {
@@ -555,7 +553,7 @@ async function runLiveLoop() {
     try {
       setAppState('live', '🔴 Scanning...');
       description = await nextFetchPromise; // wait for the in-flight fetch
-    } catch(err) {
+    } catch (err) {
       console.error('Live fetch error:', err);
       setAppState('live', 'Connection error — retrying...');
       await new Promise(r => setTimeout(r, 2000));
@@ -681,7 +679,7 @@ document.body.addEventListener('click', async (e) => {
       if (queryDebounceTimer) { clearTimeout(queryDebounceTimer); queryDebounceTimer = null; }
 
       // Hard-reset the recognition state — cancel() leaves Chrome in a dirty state
-      if (recognition) { try { recognition.abort(); } catch(e) {} recognition = null; }
+      if (recognition) { try { recognition.abort(); } catch (e) { } recognition = null; }
       recognitionActive = false;
       ttsEndedAt = Date.now(); // start deaf period so AI doesn't hear its own cutoff
 
@@ -696,10 +694,10 @@ document.body.addEventListener('click', async (e) => {
 });
 
 // ── Settings Modal ─────────────────────────────────────────────────────────────
-const settingsBtn    = document.getElementById('settings-btn');
-const settingsModal  = document.getElementById('settings-modal');
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
 const ollamaUrlInput = document.getElementById('ollama-url-input');
-const settingsSave   = document.getElementById('settings-save');
+const settingsSave = document.getElementById('settings-save');
 const settingsCancel = document.getElementById('settings-cancel');
 
 settingsBtn.addEventListener('click', (e) => {
