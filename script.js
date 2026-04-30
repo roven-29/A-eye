@@ -6,9 +6,16 @@ const transcriptEl = document.getElementById('transcript');
 const statusBadge = document.getElementById('status-badge');
 
 // ── Ollama Config ──────────────────────────────────────────────────────────────
-// Reads from localStorage so the user can configure their ngrok URL via settings
+// Reads from localStorage so the user can configure their ngrok URL via settings.
+// Appends ?ngrok-skip-browser-warning=true for non-localhost URLs to bypass ngrok's 403 page.
 function getOllamaUrl() {
-  return (localStorage.getItem('ollama_url') || 'http://localhost:11434').replace(/\/$/, '');
+  const base = (localStorage.getItem('ollama_url') || 'http://localhost:11434').replace(/\/$/, '');
+  return base;
+}
+function ollamaEndpoint(path) {
+  const base = getOllamaUrl();
+  const isNgrok = base.includes('ngrok');
+  return `${base}${path}${isNgrok ? '?ngrok-skip-browser-warning=true' : ''}`;
 }
 const OLLAMA_MODEL = 'minicpm-v';
 
@@ -252,12 +259,9 @@ Look at the image carefully and respond to their request clearly and concisely.
 You MUST always respond in ENGLISH ONLY. Do not use any other language under any circumstances.
 Respond in plain text only — no markdown, no bullet points, no special characters.`;
 
-  const response = await fetch(`${getOllamaUrl()}/api/generate`, {
+  const response = await fetch(ollamaEndpoint('/api/generate'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true'  // bypass ngrok's 403 browser warning page
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       prompt: prompt,
@@ -483,12 +487,9 @@ async function oneShotDescribe() {
   await startLoadingSound();
 
   try {
-    const response = await fetch(`${getOllamaUrl()}/api/generate`, {
+    const response = await fetch(ollamaEndpoint('/api/generate'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         prompt: 'Describe what is directly in front of the camera in 2 to 3 sentences. Be specific and helpful for a visually impaired person. English only. No markdown. No filler phrases.',
@@ -518,12 +519,9 @@ async function oneShotDescribe() {
 // Fetches a single live description from Ollama
 async function fetchLiveDescription() {
   const base64Image = captureImage();
-  const response = await fetch(`${getOllamaUrl()}/api/generate`, {
+  const response = await fetch(ollamaEndpoint('/api/generate'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       // Ultra-short prompt for fastest possible response
