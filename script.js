@@ -6,7 +6,10 @@ const transcriptEl = document.getElementById('transcript');
 const statusBadge = document.getElementById('status-badge');
 
 // ── Ollama Config ──────────────────────────────────────────────────────────────
-const OLLAMA_URL = 'http://localhost:11434';
+// Reads from localStorage so the user can configure their ngrok URL via settings
+function getOllamaUrl() {
+  return (localStorage.getItem('ollama_url') || 'http://localhost:11434').replace(/\/$/, '');
+}
 const OLLAMA_MODEL = 'minicpm-v';
 
 // ── App State ──────────────────────────────────────────────────────────────────
@@ -244,9 +247,12 @@ Look at the image carefully and respond to their request clearly and concisely.
 You MUST always respond in ENGLISH ONLY. Do not use any other language under any circumstances.
 Respond in plain text only — no markdown, no bullet points, no special characters.`;
 
-  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+  const response = await fetch(`${getOllamaUrl()}/api/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true'  // bypass ngrok's 403 browser warning page
+    },
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       prompt: prompt,
@@ -471,9 +477,12 @@ async function oneShotDescribe() {
   await startLoadingSound();
 
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    const response = await fetch(`${getOllamaUrl()}/api/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true'
+      },
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         prompt: 'Describe what is directly in front of the camera in 2 to 3 sentences. Be specific and helpful for a visually impaired person. English only. No markdown. No filler phrases.',
@@ -503,9 +512,12 @@ async function oneShotDescribe() {
 // Fetches a single live description from Ollama
 async function fetchLiveDescription() {
   const base64Image = captureImage();
-  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+  const response = await fetch(`${getOllamaUrl()}/api/generate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true'
+    },
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       // Ultra-short prompt for fastest possible response
