@@ -1,23 +1,14 @@
 // DOM Elements
-const video = document.getElementById('video-feed');
+const video       = document.getElementById('video-feed');
 const startOverlay = document.getElementById('start-overlay');
 const statusOverlay = document.getElementById('status-overlay');
 const transcriptEl = document.getElementById('transcript');
-const statusBadge = document.getElementById('status-badge');
+const statusBadge  = document.getElementById('status-badge');
 
 // ── Ollama Config ──────────────────────────────────────────────────────────────
-// Reads from localStorage so the user can configure their ngrok URL via settings.
-// Appends ?ngrok-skip-browser-warning=true for non-localhost URLs to bypass ngrok's 403 page.
-function getOllamaUrl() {
-  const base = (localStorage.getItem('ollama_url') || 'http://localhost:11434').replace(/\/$/, '');
-  return base;
-}
-function ollamaEndpoint(path) {
-  const base = getOllamaUrl();
-  const isNgrok = base.includes('ngrok');
-  return `${base}${path}${isNgrok ? '?ngrok-skip-browser-warning=true' : ''}`;
-}
+// App is served by server.js which proxies /api/* to Ollama — always same-origin.
 const OLLAMA_MODEL = 'minicpm-v';
+const API_GENERATE = '/api/generate';
 
 // ── App State ──────────────────────────────────────────────────────────────────
 let appState = 'idle'; // idle, listening, recording, processing, speaking, error, live
@@ -259,7 +250,7 @@ Look at the image carefully and respond to their request clearly and concisely.
 You MUST always respond in ENGLISH ONLY. Do not use any other language under any circumstances.
 Respond in plain text only — no markdown, no bullet points, no special characters.`;
 
-  const response = await fetch(ollamaEndpoint('/api/generate'), {
+  const response = await fetch(API_GENERATE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -435,7 +426,7 @@ function detectAndExecuteCommand(text) {
     currentTranscript = '';
     if (isLiveMode) stopLiveMode();
     else setAppState('listening');
-    setTimeout(() => ensureListening(), 400);
+    setTimeout(() => startFreshRecognition(), 400);
     return true;
   }
 
@@ -487,7 +478,7 @@ async function oneShotDescribe() {
   await startLoadingSound();
 
   try {
-    const response = await fetch(ollamaEndpoint('/api/generate'), {
+    const response = await fetch(API_GENERATE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -519,7 +510,7 @@ async function oneShotDescribe() {
 // Fetches a single live description from Ollama
 async function fetchLiveDescription() {
   const base64Image = captureImage();
-  const response = await fetch(ollamaEndpoint('/api/generate'), {
+  const response = await fetch(API_GENERATE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -644,7 +635,6 @@ const TRIPLE_TAP_DELAY = 600; // ms window to register 3 taps
 
 document.body.addEventListener('click', async (e) => {
   if (e.target.closest('#start-overlay')) return;
-  if (e.target.closest('#live-mode-btn')) return; // handled by its own listener
 
   tapCount++;
 
@@ -693,26 +683,3 @@ document.body.addEventListener('click', async (e) => {
   }, TRIPLE_TAP_DELAY);
 });
 
-// ── Settings Modal ─────────────────────────────────────────────────────────────
-const settingsBtn = document.getElementById('settings-btn');
-const settingsModal = document.getElementById('settings-modal');
-const ollamaUrlInput = document.getElementById('ollama-url-input');
-const settingsSave = document.getElementById('settings-save');
-const settingsCancel = document.getElementById('settings-cancel');
-
-settingsBtn.addEventListener('click', (e) => {
-  e.stopPropagation(); // don't trigger the start overlay click
-  ollamaUrlInput.value = localStorage.getItem('ollama_url') || '';
-  settingsModal.classList.remove('hidden');
-});
-
-settingsSave.addEventListener('click', () => {
-  const url = ollamaUrlInput.value.trim().replace(/\/$/, '');
-  if (url) localStorage.setItem('ollama_url', url);
-  else localStorage.removeItem('ollama_url');
-  settingsModal.classList.add('hidden');
-});
-
-settingsCancel.addEventListener('click', () => {
-  settingsModal.classList.add('hidden');
-});
