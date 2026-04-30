@@ -676,3 +676,27 @@ document.body.addEventListener('click', async (e) => {
     // All other taps are ignored — voice auto-send handles everything
   }, TRIPLE_TAP_DELAY);
 });
+
+// ── Settings Modal ─────────────────────────────────────────────────────────────
+const settingsBtn    = document.getElementById('settings-btn');
+const settingsModal  = document.getElementById('settings-modal');
+const ollamaUrlInput = document.getElementById('ollama-url-input');
+const settingsSave   = document.getElementById('settings-save');
+const settingsCancel = document.getElementById('settings-cancel');
+
+settingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation(); // don't trigger the start overlay click
+  ollamaUrlInput.value = localStorage.getItem('ollama_url') || '';
+  settingsModal.classList.remove('hidden');
+});
+
+settingsSave.addEventListener('click', () => {
+  const url = ollamaUrlInput.value.trim().replace(/\/$/, '');
+  if (url) localStorage.setItem('ollama_url', url);
+  else localStorage.removeItem('ollama_url');
+  settingsModal.classList.add('hidden');
+});
+
+settingsCancel.addEventListener('click', () => {
+  settingsModal.classList.add('hidden');
+});

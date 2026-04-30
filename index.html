@@ -39,6 +39,20 @@
         <div class="tap-icon">👆</div>
         <p class="tap-label">Tap anywhere to start</p>
       </div>
+      <button id="settings-btn" class="settings-btn" title="Configure Ollama URL">⚙️</button>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="settings-modal hidden">
+      <div class="settings-card">
+        <h2>Ollama Server URL</h2>
+        <p>Enter your ngrok or local network URL</p>
+        <input id="ollama-url-input" type="url" placeholder="https://xxxx.ngrok-free.app" autocomplete="off" spellcheck="false">
+        <div class="settings-actions">
+          <button id="settings-save">Save</button>
+          <button id="settings-cancel">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <main class="main-content">
